@@ -1,4 +1,4 @@
-module github.com/Bios-Marcel/yagcl/env
+module github.com/Bios-Marcel/yagcl-env
 
 go 1.18
 
