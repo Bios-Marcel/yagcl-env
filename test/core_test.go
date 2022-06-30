@@ -18,8 +18,8 @@ func Test_Parse_KeyTags(t *testing.T) {
 		FieldB string `env:"FIELD_B"`
 	}
 
-	defer setEnvTemporarily("FIELD_A", "content a")()
-	defer setEnvTemporarily("FIELD_B", "content b")()
+	t.Setenv("FIELD_A", "content a")
+	t.Setenv("FIELD_B", "content b")
 	var c configuration
 	err := yagcl.New[configuration]().
 		Add(env.Source()).
@@ -36,8 +36,8 @@ func Test_Parse_Prefix(t *testing.T) {
 		FieldB string `env:"FIELD_B"`
 	}
 
-	defer setEnvTemporarily("TEST_FIELD_A", "content a")()
-	defer setEnvTemporarily("TEST_FIELD_B", "content b")()
+	t.Setenv("TEST_FIELD_A", "content a")
+	t.Setenv("TEST_FIELD_B", "content b")
 	var c configuration
 	err := yagcl.
 		New[configuration]().
@@ -54,8 +54,8 @@ func Test_Parse_KeyValueConverter(t *testing.T) {
 		FieldB string `env:"FIELD_B"`
 	}
 
-	defer setEnvTemporarily("TEST_field_a", "content a")()
-	defer setEnvTemporarily("TEST_FIELD_B", "content b")()
+	t.Setenv("TEST_field_a", "content a")
+	t.Setenv("TEST_FIELD_B", "content b")
 	var c configuration
 	err := yagcl.
 		New[configuration]().
@@ -106,7 +106,7 @@ func Test_Parse_UnexportedFieldsIgnored(t *testing.T) {
 		fieldA string `key:"field_a"`
 	}
 
-	defer setEnvTemporarily("FIELD_A", "content a")()
+	t.Setenv("FIELD_A", "content a")
 	var c configuration
 	err := yagcl.
 		New[configuration]().
