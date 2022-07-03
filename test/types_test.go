@@ -139,6 +139,16 @@ func Test_Parse_SinglePointerToStruct(t *testing.T) {
 		assert.Equal(t, "content a", c.FieldA)
 		assert.Equal(t, "content c", (*c.FieldB).FieldC)
 	}
+
+	t.Setenv("FIELD_A", "content a")
+	t.Setenv("FIELD_B_FIELD_C", "")
+	c = configuration{}
+	c.FieldB = &substruct{}
+	err = yagcl.New[configuration]().Add(env.Source()).Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "content a", c.FieldA)
+		assert.NotNil(t, "content c", *c.FieldB)
+	}
 }
 
 func Test_Parse_SinglePointerToStruct_Invalid(t *testing.T) {
@@ -190,6 +200,15 @@ func Test_Parse_SingleNilPointerToStruct(t *testing.T) {
 		assert.Equal(t, "content a", c.FieldA)
 		assert.Equal(t, "content c", (*c.FieldB).FieldC)
 	}
+
+	t.Setenv("FIELD_A", "content a")
+	t.Setenv("FIELD_B_FIELD_C", "")
+	c = configuration{}
+	err = yagcl.New[configuration]().Add(env.Source()).Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "content a", c.FieldA)
+		assert.Nil(t, c.FieldB)
+	}
 }
 
 func Test_Parse_PointerOfDoomToStruct(t *testing.T) {
@@ -207,6 +226,15 @@ func Test_Parse_PointerOfDoomToStruct(t *testing.T) {
 	if assert.NoError(t, err) {
 		assert.Equal(t, "content a", c.FieldA)
 		assert.Equal(t, "content c", (**************c.FieldB).FieldC)
+	}
+
+	t.Setenv("FIELD_A", "content a")
+	t.Setenv("FIELD_B_FIELD_C", "")
+	c = configuration{}
+	err = yagcl.New[configuration]().Add(env.Source()).Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "content a", c.FieldA)
+		assert.Nil(t, c.FieldB)
 	}
 }
 
@@ -232,6 +260,15 @@ func Test_Parse_NestedPointerOfDoomToStruct(t *testing.T) {
 		fieldD := (**************fieldC).FieldD
 		fieldE := (**************fieldD).FieldE
 		assert.Equal(t, "content c", fieldE)
+	}
+
+	t.Setenv("FIELD_A", "content a")
+	t.Setenv("FIELD_B_FIELD_C_FIELD_D_FIELD_E", "")
+	c = configuration{}
+	err = yagcl.New[configuration]().Add(env.Source()).Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "content a", c.FieldA)
+		assert.Nil(t, c.FieldB)
 	}
 }
 
