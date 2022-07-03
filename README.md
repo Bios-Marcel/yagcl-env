@@ -13,3 +13,8 @@ access to reading environment variables.
 ```
 go get github.com/Bios-Marcel/yagcl-env
 ```
+
+## Reporting Issues / Requesting features
+
+All "official" sources for YAGCL should be reported in the [main repositories
+issue section](https://github.com/Bios-Marcel/yagcl/issues).
