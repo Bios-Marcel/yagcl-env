@@ -1,6 +1,7 @@
 package env
 
 import (
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,28 +119,64 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 			}
 		}
 
-		parsed, errParseValue := parseValue(structField.Name, structField.Type, envValue)
-		if errParseValue != nil {
-			if errParseValue != errEmbeddedStructDetected {
-				return errParseValue
+		// In this section we check whether custom unmarshallers are present.
+		// Types with a custom unmarshaller have to be checked first before
+		// attempting to parse them using default behaviour, as the behaviour
+		// might differ from std/json otherwise.
+		var parsed reflect.Value
+
+		// Technically this check isn't required, as we already filter out
+		// unexported fields. However, I am unsure whether this behaviour is set
+		// in stone, as it hasn't been documented properly.
+		// https://stackoverflow.com/questions/50279840/when-is-go-reflect-caninterface-false
+		if value.CanInterface() {
+			// For pointers, we require the non-pointer type underneath.
+			newType := value.Type()
+			if value.Kind() == reflect.Pointer {
+				for newType.Kind() == reflect.Pointer {
+					newType = newType.Elem()
+				}
 			}
 
-			if value.Kind() != reflect.Pointer {
-				if errParse := s.parse(joinedEnvKey, value); errParse != nil {
+			// New pointer value, since non-pointers can't implement json.UnmarshalText.
+			parsed = reflect.New(newType)
+			if u, ok := parsed.Interface().(encoding.TextUnmarshaler); ok {
+				if err := u.UnmarshalText([]byte(envValue)); err != nil {
+					return err
+				}
+
+				parsed = reflect.Indirect(parsed)
+			} else {
+				// Make sure we attempt a manual parse later.
+				parsed = reflect.Zero(newType)
+			}
+		}
+
+		if parsed.IsZero() {
+			var errParseValue error
+			parsed, errParseValue = parseValue(structField.Name, structField.Type, envValue)
+			if errParseValue != nil {
+				if errParseValue != errEmbeddedStructDetected {
+					return errParseValue
+				}
+
+				if value.Kind() != reflect.Pointer {
+					if errParse := s.parse(joinedEnvKey, value); errParse != nil {
+						return errParse
+					}
+					continue
+				}
+
+				newType := structField.Type.Elem()
+				for newType.Kind() == reflect.Pointer {
+					newType = newType.Elem()
+				}
+				newStruct := reflect.Indirect(reflect.New(newType))
+				if errParse := s.parse(joinedEnvKey, newStruct); errParse != nil {
 					return errParse
 				}
-				continue
+				parsed = newStruct
 			}
-
-			newType := structField.Type.Elem()
-			for newType.Kind() == reflect.Pointer {
-				newType = newType.Elem()
-			}
-			newStruct := reflect.Indirect(reflect.New(newType))
-			if errParse := s.parse(joinedEnvKey, newStruct); errParse != nil {
-				return errParse
-			}
-			parsed = newStruct
 		}
 
 		if parsed.IsZero() {

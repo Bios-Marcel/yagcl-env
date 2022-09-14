@@ -1,9 +1,11 @@
 package env
 
 import (
+	"encoding"
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -606,4 +608,88 @@ func Test_Parse_DefaultValue_Int(t *testing.T) {
 	if assert.NoError(t, err) {
 		assert.Equal(t, 1, c.FieldA)
 	}
+}
+
+type customTextUnmarshalable string
+
+func (uc *customTextUnmarshalable) UnmarshalText(data []byte) error {
+	*uc = customTextUnmarshalable(strings.ToUpper(string(data)))
+	return nil
+}
+
+func (uc customTextUnmarshalable) String() string {
+	return string(uc)
+}
+
+func Test_CustomTextUnmarshaler_InterfaceCompliance(t *testing.T) {
+	var temp = customTextUnmarshalable("")
+	var _ encoding.TextUnmarshaler = &temp
+}
+
+func Test_Parse_CustomTextUnmarshaler(t *testing.T) {
+	type configuration struct {
+		FieldA customTextUnmarshalable `key:"field_a"`
+	}
+
+	t.Setenv("FIELD_A", "lower")
+	var c configuration
+	err := yagcl.New[configuration]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, customTextUnmarshalable("LOWER"), c.FieldA)
+	}
+}
+
+func Test_Parse_CustomTextUnmarshaler_Nested(t *testing.T) {
+	type thing struct {
+		FieldA customTextUnmarshalable `key:"field_a"`
+	}
+	type configuration struct {
+		Thing thing `key:"thing"`
+	}
+
+	t.Setenv("THING_FIELD_A", "lower")
+	var c configuration
+	err := yagcl.New[configuration]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, customTextUnmarshalable("LOWER"), c.Thing.FieldA)
+	}
+}
+
+//TODO Write test for struct with multiplie fields that get ignored due to the
+//struct already being parsed.
+
+func Test_Parse_CustomTextUnmarshaler_Pointers(t *testing.T) {
+	t.Run("single pointer", func(t *testing.T) {
+		type configuration struct {
+			FieldA *customTextUnmarshalable `key:"field_a"`
+		}
+
+		t.Setenv("FIELD_A", "lower")
+		var c configuration
+		err := yagcl.New[configuration]().
+			Add(env.Source()).
+			Parse(&c)
+		if assert.NoError(t, err) {
+			assert.Equal(t, customTextUnmarshalable("LOWER"), *c.FieldA)
+		}
+	})
+
+	t.Run("multi pointer", func(t *testing.T) {
+		type configuration struct {
+			FieldA ***customTextUnmarshalable `key:"field_a"`
+		}
+
+		t.Setenv("FIELD_A", "lower")
+		var c configuration
+		err := yagcl.New[configuration]().
+			Add(env.Source()).
+			Parse(&c)
+		if assert.NoError(t, err) {
+			assert.Equal(t, customTextUnmarshalable("LOWER"), ***c.FieldA)
+		}
+	})
 }
