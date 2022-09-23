@@ -119,6 +119,14 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 			}
 		}
 
+		// For pointers, we require the non-pointer type underneath.
+		underlyingType := value.Type()
+		if value.Kind() == reflect.Pointer {
+			for underlyingType.Kind() == reflect.Pointer {
+				underlyingType = underlyingType.Elem()
+			}
+		}
+
 		// In this section we check whether custom unmarshallers are present.
 		// Types with a custom unmarshaller have to be checked first before
 		// attempting to parse them using default behaviour, as the behaviour
@@ -130,16 +138,8 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 		// in stone, as it hasn't been documented properly.
 		// https://stackoverflow.com/questions/50279840/when-is-go-reflect-caninterface-false
 		if value.CanInterface() {
-			// For pointers, we require the non-pointer type underneath.
-			newType := value.Type()
-			if value.Kind() == reflect.Pointer {
-				for newType.Kind() == reflect.Pointer {
-					newType = newType.Elem()
-				}
-			}
-
 			// New pointer value, since non-pointers can't implement json.UnmarshalText.
-			parsed = reflect.New(newType)
+			parsed = reflect.New(underlyingType)
 			if u, ok := parsed.Interface().(encoding.TextUnmarshaler); ok {
 				if err := u.UnmarshalText([]byte(envValue)); err != nil {
 					return err
@@ -148,7 +148,7 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 				parsed = reflect.Indirect(parsed)
 			} else {
 				// Make sure we attempt a manual parse later.
-				parsed = reflect.Zero(newType)
+				parsed = reflect.Zero(underlyingType)
 			}
 		}
 
@@ -177,6 +177,8 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 				}
 				parsed = newStruct
 			}
+			// Make sure that we have the correct alias type if necessary.
+			parsed = parsed.Convert(underlyingType)
 		}
 
 		if parsed.IsZero() {

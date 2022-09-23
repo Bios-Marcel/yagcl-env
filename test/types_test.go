@@ -693,3 +693,34 @@ func Test_Parse_CustomTextUnmarshaler_Pointers(t *testing.T) {
 		}
 	})
 }
+
+func Test_Parse_TypeAlias_NoCustomUnmarshal(t *testing.T) {
+	type noopstring string
+	type configuration struct {
+		FieldA noopstring `key:"field_a"`
+	}
+	t.Setenv("FIELD_A", "lower")
+	var c configuration
+	err := yagcl.New[configuration]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, noopstring("lower"), c.FieldA)
+	}
+}
+
+func Test_Parse_TypeAlias_Pointer_NoCustomUnmarshal(t *testing.T) {
+	type noopstring string
+	type configuration struct {
+		FieldA *noopstring `key:"field_a"`
+	}
+	t.Setenv("FIELD_A", "lower")
+	var c configuration
+	err := yagcl.New[configuration]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		result := noopstring("lower")
+		assert.Equal(t, &result, c.FieldA)
+	}
+}
