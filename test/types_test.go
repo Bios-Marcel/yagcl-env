@@ -724,3 +724,40 @@ func Test_Parse_TypeAlias_Pointer_NoCustomUnmarshal(t *testing.T) {
 		assert.Equal(t, &result, c.FieldA)
 	}
 }
+
+func Test_Parse_TypeAlias_CustomStructType(t *testing.T) {
+	type noopstring struct {
+		Value string `key:"value"`
+	}
+	type noopstringwrapper noopstring
+	type configuration struct {
+		FieldA noopstringwrapper `key:"field_a"`
+	}
+	t.Setenv("FIELD_A_VALUE", "lower")
+	var c configuration
+	err := yagcl.New[configuration]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, noopstringwrapper{Value: "lower"}, c.FieldA)
+	}
+}
+
+func Test_Parse_TypeAlias_Pointer_CustomStructType(t *testing.T) {
+	type noopstring struct {
+		Value string `key:"value"`
+	}
+	type noopstringwrapper noopstring
+	type configuration struct {
+		FieldA *noopstringwrapper `key:"field_a"`
+	}
+	t.Setenv("FIELD_A_VALUE", "lower")
+	var c configuration
+	err := yagcl.New[configuration]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		result := noopstringwrapper{Value: "lower"}
+		assert.Equal(t, &result, c.FieldA)
+	}
+}
