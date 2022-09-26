@@ -88,25 +88,22 @@ func (s *EnvSource) KeyTag() string {
 }
 
 // Parse implements Source.Parse.
-func (s *EnvSource) Parse(configurationStruct any) (bool, error) {
+func (s *EnvSource) Parse(parsingCompanion yagcl.ParsingCompanion, configurationStruct any) (bool, error) {
 	// FIXME For now we always say we've loaded something, this should change
 	// at some point, using some kind of "was at least one variable loaded"
 	// check.
-	return true, s.parse(s.prefix, reflect.Indirect(reflect.ValueOf(configurationStruct)))
+	return true, s.parse(parsingCompanion, s.prefix, reflect.Indirect(reflect.ValueOf(configurationStruct)))
 }
 
-func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
+func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix string, structValue reflect.Value) error {
 	structType := structValue.Type()
 	for i := 0; i < structValue.NumField(); i++ {
 		structField := structType.Field(i)
-		// By default, all exported fiels are not ignored and all exported
-		// fields are. Unexported fields can't be un-ignored though.
-		if !structField.IsExported() || strings.EqualFold(structField.Tag.Get("ignore"), "true") {
+		if !parsingCompanion.IncludeField(structField) {
 			continue
 		}
 
-		value := structValue.Field(i)
-		envKey, errExtractKey := s.extractEnvKey(value, structField)
+		envKey, errExtractKey := s.extractEnvKey(parsingCompanion, structField)
 		if errExtractKey != nil {
 			return errExtractKey
 		}
@@ -118,6 +115,8 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 				continue
 			}
 		}
+
+		value := structValue.Field(i)
 
 		// For pointers, we require the non-pointer type underneath.
 		underlyingType := value.Type()
@@ -161,7 +160,7 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 				}
 
 				if value.Kind() != reflect.Pointer {
-					if errParse := s.parse(joinedEnvKey, value); errParse != nil {
+					if errParse := s.parse(parsingCompanion, joinedEnvKey, value); errParse != nil {
 						return errParse
 					}
 					continue
@@ -172,7 +171,7 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 					newType = newType.Elem()
 				}
 				newStruct := reflect.Indirect(reflect.New(newType))
-				if errParse := s.parse(joinedEnvKey, newStruct); errParse != nil {
+				if errParse := s.parse(parsingCompanion, joinedEnvKey, newStruct); errParse != nil {
 					return errParse
 				}
 				parsed = newStruct
@@ -212,29 +211,28 @@ func (s *EnvSource) parse(envPrefix string, structValue reflect.Value) error {
 // recurse. This error should never reach the outer world.
 var errEmbeddedStructDetected = errors.New("embedded struct detected")
 
-func (s *EnvSource) extractEnvKey(value reflect.Value, structField reflect.StructField) (string, error) {
-	var (
-		envKey string
-		tagSet bool
-	)
-	customKeyTag := s.KeyTag()
-	if customKeyTag != "" {
-		envKey, tagSet = structField.Tag.Lookup(customKeyTag)
-	}
-	if !tagSet {
-		envKey, tagSet = structField.Tag.Lookup(yagcl.DefaultKeyTagName)
-		if !tagSet {
-			if customKeyTag != "" {
-				return "", fmt.Errorf("neither tag '%s' nor the standard tag '%s' have been set for field '%s': %w", customKeyTag, yagcl.DefaultKeyTagName, structField.Name, yagcl.ErrExportedFieldMissingKey)
-			}
-			// Technically dead code right now, but we'll leave it in, as I am
-			// unsure how the API will develop. Maybe overriding of keys should
-			// be allowed to prevent clashing with other libraries?
-			return "", fmt.Errorf("standard tag '%s' has not been set for field '%s': %w", yagcl.DefaultKeyTagName, structField.Name, yagcl.ErrExportedFieldMissingKey)
+func (s *EnvSource) extractEnvKey(parsingCompanion yagcl.ParsingCompanion, structField reflect.StructField) (string, error) {
+	// Custom tag
+	if s.KeyTag() != "" {
+		key := structField.Tag.Get(s.KeyTag())
+		if key != "" {
+			return key, nil
 		}
-		envKey = s.keyValueConverter(envKey)
 	}
-	return envKey, nil
+
+	// Fallback tag
+	if key := parsingCompanion.ExtractFieldKey(structField); key != "" {
+		return s.keyValueConverter(key), nil
+	}
+
+	// No tag found
+	if s.KeyTag() != "" {
+		return "", fmt.Errorf("neither tag '%s' nor the standard tag '%s' have been set for field '%s': %w", s.KeyTag(), yagcl.DefaultKeyTagName, structField.Name, yagcl.ErrExportedFieldMissingKey)
+	}
+	// Technically dead code right now, but we'll leave it in, as I am
+	// unsure how the API will develop. Maybe overriding of keys should
+	// be allowed to prevent clashing with other libraries?
+	return "", fmt.Errorf("standard tag '%s' has not been set for field '%s': %w", yagcl.DefaultKeyTagName, structField.Name, yagcl.ErrExportedFieldMissingKey)
 }
 
 func parseValue(fieldName string, fieldType reflect.Type, envValue string) (reflect.Value, error) {
