@@ -761,3 +761,153 @@ func Test_Parse_TypeAlias_Pointer_CustomStructType(t *testing.T) {
 		assert.Equal(t, &result, c.FieldA)
 	}
 }
+
+func Test_Parse_IntSlice(t *testing.T) {
+	type config struct {
+		Field []int `key:"field"`
+	}
+
+	t.Setenv("FIELD", "1,2,3")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, []int{1, 2, 3}, c.Field)
+	}
+}
+
+func Test_Parse_StringSlice(t *testing.T) {
+	type config struct {
+		Field []string `key:"field"`
+	}
+
+	t.Setenv("FIELD", "1,2,3")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, []string{"1", "2", "3"}, c.Field)
+	}
+}
+
+func Test_Parse_NestedStringSlice(t *testing.T) {
+	//FIXME Needs to be implemented
+	type config struct {
+		Field [][]string `key:"field"`
+	}
+
+	t.Setenv("FIELD", "1")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrUnsupportedFieldType)
+}
+
+func Test_Parse_SlicePointer(t *testing.T) {
+	type config struct {
+		Field *[]string `key:"field"`
+	}
+
+	t.Setenv("FIELD", "1,2,3")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		value := []string{"1", "2", "3"}
+		assert.Equal(t, &value, c.Field)
+	}
+}
+
+func Test_Parse_SlicePointerStringSlice(t *testing.T) {
+	type config struct {
+		Field *[]*string `key:"field"`
+	}
+
+	t.Setenv("FIELD", "1")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		a := "1"
+		value := []*string{&a}
+		assert.Equal(t, &value, c.Field)
+	}
+}
+
+func Test_Parse_StringPointerSlice(t *testing.T) {
+	type config struct {
+		Field []*string `key:"field"`
+	}
+
+	t.Setenv("FIELD", "1")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		value := "1"
+		assert.Equal(t, []*string{&value}, c.Field)
+	}
+}
+
+func Test_Parse_StructSlice(t *testing.T) {
+	//FIXME Needs to be implemented
+	type parsable struct {
+		FieldB string `json:"field_b"`
+	}
+	type config struct {
+		Field []parsable `key:"field"`
+	}
+
+	t.Setenv("FIELD", `{"field_b": "b"}`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrUnsupportedFieldType)
+}
+
+func Test_Parse_StringMultiPointerSlice(t *testing.T) {
+	type config struct {
+		Field []***string `key:"field"`
+	}
+
+	t.Setenv("FIELD", "1")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		x := "1"
+		y := &x
+		z := &y
+		assert.Equal(t, []***string{&z}, c.Field)
+	}
+}
+
+func Test_Parse_IntArray(t *testing.T) {
+	type config struct {
+		Field [1]int `key:"field"`
+	}
+
+	t.Setenv("FIELD", "1")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, [1]int{1}, c.Field)
+	}
+
+	t.Setenv("FIELD", "1,2,3")
+	c = config{}
+	err = yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
+}

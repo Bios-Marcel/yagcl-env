@@ -184,24 +184,7 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 			continue
 		}
 
-		if value.Kind() == reflect.Pointer {
-			//Create as many values as we have pointers pointing to things.
-			var pointers []reflect.Value
-			lastPointer := reflect.New(value.Type().Elem())
-			pointers = append(pointers, lastPointer)
-			for lastPointer.Elem().Kind() == reflect.Pointer {
-				lastPointer = reflect.New(lastPointer.Elem().Type().Elem())
-				pointers = append(pointers, lastPointer)
-			}
-
-			pointers[len(pointers)-1].Elem().Set(parsed)
-			for i := len(pointers) - 2; i >= 0; i-- {
-				pointers[i].Elem().Set(pointers[i+1])
-			}
-			value.Set(pointers[0])
-		} else {
-			value.Set(parsed)
-		}
+		value.Set(convertValueToPointerIfRequired(value, parsed))
 	}
 
 	return nil
@@ -210,6 +193,30 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 // errEmbeddedStructDetected is abused internally to detect that we need to
 // recurse. This error should never reach the outer world.
 var errEmbeddedStructDetected = errors.New("embedded struct detected")
+
+// convertValueToPointerIfRequired creates reflect.Value wrapper of the
+// required pointer types if necessary, otherwise, this is basically
+// a no-op.
+func convertValueToPointerIfRequired(targetValue reflect.Value, newValue reflect.Value) reflect.Value {
+	if targetValue.Kind() != reflect.Pointer {
+		return newValue
+	}
+
+	//Create as many values as we have pointers pointing to things.
+	var pointers []reflect.Value
+	lastPointer := reflect.New(targetValue.Type().Elem())
+	pointers = append(pointers, lastPointer)
+	for lastPointer.Elem().Kind() == reflect.Pointer {
+		lastPointer = reflect.New(lastPointer.Elem().Type().Elem())
+		pointers = append(pointers, lastPointer)
+	}
+
+	pointers[len(pointers)-1].Elem().Set(newValue)
+	for i := len(pointers) - 2; i >= 0; i-- {
+		pointers[i].Elem().Set(pointers[i+1])
+	}
+	return pointers[0]
+}
 
 func (s *EnvSource) extractEnvKey(parsingCompanion yagcl.ParsingCompanion, structField reflect.StructField) (string, error) {
 	// Custom tag
@@ -303,17 +310,77 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 		{
 			return parseValue(fieldName, extractNonPointerFieldType(fieldType), envValue)
 		}
+	case reflect.Slice:
+		{
+			if !isSliceTypeSupported(fieldType.Elem()) {
+				return reflect.Value{}, fmt.Errorf("field '%s' has unsupported type '%s': %w", fieldName, fieldType.String(), yagcl.ErrUnsupportedFieldType)
+			}
+
+			arrayRawValues := strings.Split(envValue, ",")
+			targetArray := reflect.MakeSlice(fieldType, len(arrayRawValues), len(arrayRawValues))
+			if err := parseIntoArray(fieldName, fieldType, targetArray, arrayRawValues); err != nil {
+				return reflect.Value{}, err
+			}
+			return targetArray, nil
+		}
+
+	case reflect.Array:
+		// Arrays are of fixed size and therefore append calls won't work.
+		{
+			if !isSliceTypeSupported(fieldType.Elem()) {
+				return reflect.Value{}, fmt.Errorf("field '%s' has unsupported type '%s': %w", fieldName, fieldType.String(), yagcl.ErrUnsupportedFieldType)
+			}
+
+			targetArray := reflect.Indirect(reflect.New(fieldType))
+			arrayRawValues := strings.Split(envValue, ",")
+			if targetArray.Len() != len(arrayRawValues) {
+				return reflect.Value{}, fmt.Errorf("value specified for field '%s' is an array of incorrect length, expected length %d, but got %d: %w", fieldName, targetArray.Len(), len(arrayRawValues), yagcl.ErrParseValue)
+			}
+			if err := parseIntoArray(fieldName, fieldType, targetArray, arrayRawValues); err != nil {
+				return reflect.Value{}, err
+			}
+			return targetArray, nil
+		}
 	case reflect.Complex64, reflect.Complex128:
 		{
 			// Complex isn't supported, as for example it also isn't supported
 			// by the stdlib json encoder / decoder.
-			return reflect.Value{}, fmt.Errorf("type '%s' isn't supported and won't ever be: %w", fieldName, yagcl.ErrUnsupportedFieldType)
+			return reflect.Value{}, fmt.Errorf("field '%s' has unsupported type '%s' (Support not planned): %w", fieldName, fieldType.String(), yagcl.ErrUnsupportedFieldType)
 		}
 	default:
 		{
-			return reflect.Value{}, fmt.Errorf("type '%s': %w", fieldName, yagcl.ErrUnsupportedFieldType)
+			return reflect.Value{}, fmt.Errorf("field '%s' has unsupported type '%s': %w", fieldName, fieldType.String(), yagcl.ErrUnsupportedFieldType)
 		}
 	}
+}
+
+func isSliceTypeSupported(sliceType reflect.Type) bool {
+	switch extractNonPointerFieldType(sliceType).Kind() {
+	case
+		reflect.UnsafePointer,
+		reflect.Complex64,
+		reflect.Complex128,
+		reflect.Struct,
+		//FIXME These two still need to be implemented
+		reflect.Array,
+		reflect.Slice:
+
+		return false
+	}
+
+	return true
+}
+
+func parseIntoArray(fieldName string, fieldType reflect.Type, targetArray reflect.Value, arrayRawValues []string) error {
+	for index, rawValue := range arrayRawValues {
+		parsedValue, err := parseValue(fieldName, fieldType.Elem(), rawValue)
+		if err != nil {
+			return err
+		}
+		targetIndex := targetArray.Index(index)
+		targetIndex.Set(convertValueToPointerIfRequired(targetIndex, parsedValue))
+	}
+	return nil
 }
 
 func extractNonPointerFieldType(fieldType reflect.Type) reflect.Type {
