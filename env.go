@@ -74,9 +74,10 @@ func defaultKeyJoiner(s1, s2 string) string {
 	if s1 == "" {
 		return s2
 	}
-	if s2 == "" {
-		return s1
-	}
+
+	// We don't check for s2 emptiness, as it is expected to always hold a
+	// non-empty value.
+
 	// By default we want to use whatever keys we have, and join them
 	// with underscores, preventing duplicate underscores.
 	return strings.Trim(s1, "_") + "_" + strings.Trim(s2, "_")
