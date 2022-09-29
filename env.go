@@ -27,7 +27,7 @@ type EnvSource struct {
 func Source() *EnvSource {
 	return &EnvSource{
 		keyValueConverter: defaultKeyValueConverter,
-		keyJoiner:         defaulKeyJoiner,
+		keyJoiner:         defaultKeyJoiner,
 	}
 }
 
@@ -70,7 +70,7 @@ func (s *EnvSource) KeyJoiner(keyJoiner func(string, string) string) *EnvSource 
 	return s
 }
 
-func defaulKeyJoiner(s1, s2 string) string {
+func defaultKeyJoiner(s1, s2 string) string {
 	if s1 == "" {
 		return s2
 	}
