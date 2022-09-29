@@ -167,11 +167,8 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 					continue
 				}
 
-				newType := structField.Type.Elem()
-				for newType.Kind() == reflect.Pointer {
-					newType = newType.Elem()
-				}
-				newStruct := reflect.Indirect(reflect.New(newType))
+				underlyingType := extractNonPointerFieldType(structField.Type.Elem())
+				newStruct := reflect.Indirect(reflect.New(underlyingType))
 				if errParse := s.parse(parsingCompanion, joinedEnvKey, newStruct); errParse != nil {
 					return errParse
 				}
