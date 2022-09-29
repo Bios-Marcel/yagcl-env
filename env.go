@@ -120,12 +120,7 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 		value := structValue.Field(i)
 
 		// For pointers, we require the non-pointer type underneath.
-		underlyingType := value.Type()
-		if value.Kind() == reflect.Pointer {
-			for underlyingType.Kind() == reflect.Pointer {
-				underlyingType = underlyingType.Elem()
-			}
-		}
+		underlyingType := extractNonPointerFieldType(value.Type())
 
 		// In this section we check whether custom unmarshallers are present.
 		// Types with a custom unmarshaller have to be checked first before
