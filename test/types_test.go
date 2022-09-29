@@ -792,6 +792,24 @@ func Test_Parse_StringSlice(t *testing.T) {
 	}
 }
 
+func Test_Parse_StringSlice_EscapingRequired(t *testing.T) {
+	type config struct {
+		Field  []string `key:"field"`
+		FieldB []string `key:"field_b"`
+	}
+
+	t.Setenv("FIELD", `schöner tag\, oder?,2,3`)
+	t.Setenv("FIELD_B", `\\,\\,lol,lol\\foo`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, []string{"schöner tag, oder?", "2", "3"}, c.Field)
+		assert.Equal(t, []string{`\`, `\`, `lol`, `lol\foo`}, c.FieldB)
+	}
+}
+
 func Test_Parse_NestedStringSlice(t *testing.T) {
 	//FIXME Needs to be implemented
 	type config struct {

@@ -314,7 +314,7 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 				return reflect.Value{}, fmt.Errorf("field '%s' has unsupported type '%s': %w", fieldName, fieldType.String(), yagcl.ErrUnsupportedFieldType)
 			}
 
-			arrayRawValues := strings.Split(envValue, ",")
+			arrayRawValues := splitArrayLiteral(envValue)
 			targetArray := reflect.MakeSlice(fieldType, len(arrayRawValues), len(arrayRawValues))
 			if err := parseIntoArray(fieldName, fieldType, targetArray, arrayRawValues); err != nil {
 				return reflect.Value{}, err
@@ -330,7 +330,7 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 			}
 
 			targetArray := reflect.Indirect(reflect.New(fieldType))
-			arrayRawValues := strings.Split(envValue, ",")
+			arrayRawValues := splitArrayLiteral(envValue)
 			if targetArray.Len() != len(arrayRawValues) {
 				return reflect.Value{}, fmt.Errorf("value specified for field '%s' is an array of incorrect length, expected length %d, but got %d: %w", fieldName, targetArray.Len(), len(arrayRawValues), yagcl.ErrParseValue)
 			}
@@ -350,6 +350,36 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 			return reflect.Value{}, fmt.Errorf("field '%s' has unsupported type '%s': %w", fieldName, fieldType.String(), yagcl.ErrUnsupportedFieldType)
 		}
 	}
+}
+
+func splitArrayLiteral(literal string) []string {
+	var values []string
+	var buffer []rune
+	var escapeNext bool
+	maxIndex := len(literal) - 1
+	for index, character := range literal {
+		if index == maxIndex {
+			if character != ',' || escapeNext {
+				buffer = append(buffer, character)
+			}
+			values = append(values, string(buffer))
+			break
+		}
+
+		escape := escapeNext
+		escapeNext = false
+
+		if character == ',' && !escape {
+			values = append(values, string(buffer))
+			buffer = buffer[:0]
+		} else if character == '\\' && !escape {
+			escapeNext = true
+		} else {
+			buffer = append(buffer, character)
+		}
+	}
+
+	return values
 }
 
 func isSliceTypeSupported(sliceType reflect.Type) bool {
