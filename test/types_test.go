@@ -929,3 +929,114 @@ func Test_Parse_IntArray(t *testing.T) {
 		Parse(&c)
 	assert.ErrorIs(t, err, yagcl.ErrParseValue)
 }
+
+func Test_Parse_Map_IntInt(t *testing.T) {
+	type config struct {
+		Field map[int]int `key:"field"`
+	}
+	t.Setenv("FIELD", `1=1,2=3`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, map[int]int{1: 1, 2: 3}, c.Field)
+	}
+}
+
+func Test_Parse_Map_StringString(t *testing.T) {
+	type config struct {
+		Field map[string]string `key:"field"`
+	}
+	t.Setenv("FIELD", `1=1,2=3`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, map[string]string{"1": "1", "2": "3"}, c.Field)
+	}
+}
+
+func Test_Parse_Map_StringInt(t *testing.T) {
+	type config struct {
+		Field map[string]int `key:"field"`
+	}
+	t.Setenv("FIELD", `1=1,2=3`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, map[string]int{"1": 1, "2": 3}, c.Field)
+	}
+}
+
+func Test_Parse_Map_IntString(t *testing.T) {
+	type config struct {
+		Field map[int]string `key:"field"`
+	}
+	t.Setenv("FIELD", `1=1,2=3`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, map[int]string{1: "1", 2: "3"}, c.Field)
+	}
+}
+
+func Test_Parse_Map_IntInt_UnparsableValue(t *testing.T) {
+	type config struct {
+		Field map[int]int `key:"field"`
+	}
+
+	t.Setenv("FIELD", `1=lol`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
+
+	t.Setenv("FIELD", `lol=1`)
+	c = config{}
+	err = yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
+}
+
+func Test_Parse_Map_IntInt_FormatError(t *testing.T) {
+	type config struct {
+		Field map[int]int `key:"field"`
+	}
+	t.Setenv("FIELD", `1=1,2=`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
+
+	t.Setenv("FIELD", `1=1=3,2=3`)
+	c = config{}
+	err = yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
+}
+
+func Test_Parse_Map_StringEscaping(t *testing.T) {
+	type config struct {
+		Field map[int]string `key:"field"`
+	}
+	// Double escaping required, as \ is already used in environment
+	// variables for escaping.
+	t.Setenv("FIELD", `1=good day\\=fun`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, map[int]string{1: "good day=fun"}, c.Field)
+	}
+}

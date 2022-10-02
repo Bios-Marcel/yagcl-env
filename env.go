@@ -303,13 +303,38 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 		{
 			return parseValue(fieldName, extractNonPointerFieldType(fieldType), envValue)
 		}
+	case reflect.Map:
+		{
+			rawEntries := splitString(envValue, ',')
+			targetMap := reflect.MakeMapWithSize(fieldType, len(rawEntries))
+			for index, entry := range rawEntries {
+				keyValue := splitString(entry, '=')
+				if len(keyValue) == 1 {
+					return reflect.Value{}, fmt.Errorf("field '%s' contains possibly misformatted value at index %d ('%s'); no unescaped '=' was found to separate key from value: %w", fieldName, index, entry, yagcl.ErrParseValue)
+				}
+				if len(keyValue) > 2 {
+					return reflect.Value{}, fmt.Errorf("field '%s' contains possibly misformatted value at index %d ('%s'); more than one unescaped '=' has been found: %w", fieldName, index, entry, yagcl.ErrParseValue)
+				}
+				parsedKey, errParseKey := parseValue(fieldName, fieldType.Key(), keyValue[0])
+				if errParseKey != nil {
+					return reflect.Value{}, fmt.Errorf("field '%s' contained unparsable key '%s': %w", fieldName, keyValue[0], yagcl.ErrParseValue)
+				}
+				parsedValue, errParseValue := parseValue(fieldName, fieldType.Elem(), keyValue[1])
+				if errParseValue != nil {
+					return reflect.Value{}, fmt.Errorf("field '%s' contained unparsable value '%s': %w", fieldName, keyValue[1], yagcl.ErrParseValue)
+				}
+				targetMap.SetMapIndex(parsedKey, parsedValue)
+			}
+
+			return targetMap, nil
+		}
 	case reflect.Slice:
 		{
 			if !isSliceTypeSupported(fieldType.Elem()) {
 				return reflect.Value{}, fmt.Errorf("field '%s' has unsupported type '%s': %w", fieldName, fieldType.String(), yagcl.ErrUnsupportedFieldType)
 			}
 
-			arrayRawValues := splitArrayLiteral(envValue)
+			arrayRawValues := splitString(envValue, ',')
 			targetArray := reflect.MakeSlice(fieldType, len(arrayRawValues), len(arrayRawValues))
 			if err := parseIntoArray(fieldName, fieldType, targetArray, arrayRawValues); err != nil {
 				return reflect.Value{}, err
@@ -325,7 +350,7 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 			}
 
 			targetArray := reflect.Indirect(reflect.New(fieldType))
-			arrayRawValues := splitArrayLiteral(envValue)
+			arrayRawValues := splitString(envValue, ',')
 			if targetArray.Len() != len(arrayRawValues) {
 				return reflect.Value{}, fmt.Errorf("value specified for field '%s' is an array of incorrect length, expected length %d, but got %d: %w", fieldName, targetArray.Len(), len(arrayRawValues), yagcl.ErrParseValue)
 			}
@@ -347,14 +372,17 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 	}
 }
 
-func splitArrayLiteral(literal string) []string {
+// splitString splits the given "literal" at each "splitChar" found.
+// Additionally it allows you to escape the "splitChar" by using "\", which
+// on the other hand can be escaped the same way.
+func splitString(literal string, splitChar rune) []string {
 	var values []string
 	var buffer []rune
 	var escapeNext bool
 	maxIndex := len(literal) - 1
 	for index, character := range literal {
 		if index == maxIndex {
-			if character != ',' || escapeNext {
+			if character != splitChar || escapeNext {
 				buffer = append(buffer, character)
 			}
 			values = append(values, string(buffer))
@@ -364,7 +392,7 @@ func splitArrayLiteral(literal string) []string {
 		escape := escapeNext
 		escapeNext = false
 
-		if character == ',' && !escape {
+		if character == splitChar && !escape {
 			values = append(values, string(buffer))
 			buffer = buffer[:0]
 		} else if character == '\\' && !escape {
