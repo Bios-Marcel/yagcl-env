@@ -1,6 +1,7 @@
 package env
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Bios-Marcel/yagcl"
@@ -114,5 +115,31 @@ func Test_Parse_UnexportedFieldsIgnored(t *testing.T) {
 		Parse(&c)
 	if assert.NoError(t, err) {
 		assert.Empty(t, c.fieldA)
+	}
+}
+
+func Test_Parse_CustomKeyJoiner(t *testing.T) {
+	type configuration struct {
+		FieldA string `key:"field_a"`
+	}
+
+	// The prefixed will stay uppercased, as its a hardcoded value chosen by
+	// the user of the API.
+	t.Setenv("KEKjoinedfielda", "content a")
+	var c configuration
+	err := yagcl.
+		New[configuration]().
+		Add(env.
+			Source().
+			Prefix("KEK").
+			KeyJoiner(func(s1, s2 string) string {
+				return s1 + "joined" + s2
+			}).
+			KeyValueConverter(func(s string) string {
+				return strings.ToLower(strings.Replace(s, "_", "", -1))
+			})).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "content a", c.FieldA)
 	}
 }

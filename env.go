@@ -39,7 +39,7 @@ func (s *EnvSource) Prefix(prefix string) *EnvSource {
 }
 
 // KeyValueConverter defines how the yagcl.DefaultKeyTagName value should be
-// converted for this source. If you are setting this, you'll most liekly
+// converted for this source. If you are setting this, you'll most likely
 // also have to set EnvSource.KeyJoiner(string,string) string.
 // Note that calling this isn't required, as there's a best practise default
 // behaviour.
@@ -62,9 +62,8 @@ func defaultKeyValueConverter(s string) string {
 //             Field int `key:"field"`
 //         } `key:"sub"`
 //     }
-// The joiner could for example produce SUB_FIELD or subField, depending on
-// what the programmer desires. By default this function is set to uppercase
-// and connecting with underscores, preventing duplicate underscores.
+// The joiner could for example produce sub_field, depending. In combination
+// with KeyValueConverter, this could then become SUB_FIELD.
 func (s *EnvSource) KeyJoiner(keyJoiner func(string, string) string) *EnvSource {
 	s.keyJoiner = keyJoiner
 	return s
