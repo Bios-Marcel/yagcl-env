@@ -31,6 +31,10 @@ func Test_Parse_KeyTags(t *testing.T) {
 	}
 }
 
+func Test_Parse_KeyTag_NonEmpty(t *testing.T) {
+	assert.NotEmpty(t, env.Source().KeyTag())
+}
+
 func Test_Parse_Prefix(t *testing.T) {
 	type configuration struct {
 		FieldA string `key:"field_a"`

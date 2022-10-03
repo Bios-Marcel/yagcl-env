@@ -212,11 +212,9 @@ func convertValueToPointerIfRequired(targetValue reflect.Value, newValue reflect
 
 func (s *EnvSource) extractEnvKey(parsingCompanion yagcl.ParsingCompanion, structField reflect.StructField) (string, error) {
 	// Custom tag
-	if s.KeyTag() != "" {
-		key := structField.Tag.Get(s.KeyTag())
-		if key != "" {
-			return key, nil
-		}
+	key := structField.Tag.Get(s.KeyTag())
+	if key != "" {
+		return key, nil
 	}
 
 	// Fallback tag
@@ -225,13 +223,7 @@ func (s *EnvSource) extractEnvKey(parsingCompanion yagcl.ParsingCompanion, struc
 	}
 
 	// No tag found
-	if s.KeyTag() != "" {
-		return "", fmt.Errorf("neither tag '%s' nor the standard tag '%s' have been set for field '%s': %w", s.KeyTag(), yagcl.DefaultKeyTagName, structField.Name, yagcl.ErrExportedFieldMissingKey)
-	}
-	// Technically dead code right now, but we'll leave it in, as I am
-	// unsure how the API will develop. Maybe overriding of keys should
-	// be allowed to prevent clashing with other libraries?
-	return "", fmt.Errorf("standard tag '%s' has not been set for field '%s': %w", yagcl.DefaultKeyTagName, structField.Name, yagcl.ErrExportedFieldMissingKey)
+	return "", fmt.Errorf("neither tag '%s' nor the standard tag '%s' have been set for field '%s': %w", s.KeyTag(), yagcl.DefaultKeyTagName, structField.Name, yagcl.ErrExportedFieldMissingKey)
 }
 
 func parseValue(fieldName string, fieldType reflect.Type, envValue string) (reflect.Value, error) {
