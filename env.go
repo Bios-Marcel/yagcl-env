@@ -125,7 +125,6 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 		// Types with a custom unmarshaller have to be checked first before
 		// attempting to parse them using default behaviour, as the behaviour
 		// might differ from std/json otherwise.
-		var parsed reflect.Value
 
 		// Technically this check isn't required, as we already filter out
 		// unexported fields. However, I am unsure whether this behaviour is set
@@ -154,55 +153,53 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 					return fmt.Errorf("value '%s' isn't parsable as an '%s' for field '%s'; %s: %w", envValue, underlyingType.String(), structField.Name, err, yagcl.ErrParseValue)
 				}
 
-				parsed = reflect.Indirect(target)
-			} else {
-				// Make sure we attempt a manual parse later.
-				parsed = reflect.Zero(underlyingType)
+				value.Set(convertValueToPointerIfRequired(value, reflect.Indirect(target)))
+				// We are done with this field and don't need to fall back to
+				// the default parsing logic.
+				continue
 			}
 		}
 
-		if parsed.IsZero() {
-			var errParseValue error
-			parsed, errParseValue = parseValue(structField.Name, structField.Type, envValue)
-			if errParseValue != nil {
-				if errParseValue != errEmbeddedStructDetected {
-					return errParseValue
-				}
+		parsed, errParseValue := parseValue(structField.Name, structField.Type, envValue)
+		if errParseValue != nil {
+			if errParseValue != errEmbeddedStructDetected {
+				return errParseValue
+			}
 
-				// If we have a non-pointer struct, it may contain default
-				// values, which we want to preserve by not creating a new
-				// instance of the struct.
-				if deepestPotentialPointer := extractDeepestPotentialPointer(value); deepestPotentialPointer.Kind() != reflect.Pointer {
-					if errParse := s.parse(parsingCompanion, joinedEnvKey, deepestPotentialPointer); errParse != nil {
-						return errParse
-					}
-					continue
-				} else
-				// Non-nil Pointervalue, therefore we gotta use the existing
-				// value in order to preserve potentially existing defaults.
-				if !deepestPotentialPointer.IsZero() {
-					if errParse := s.parse(parsingCompanion, joinedEnvKey, deepestPotentialPointer.Elem()); errParse != nil {
-						return errParse
-					}
-					continue
-				}
-
-				underlyingType := extractNonPointerFieldType(structField.Type.Elem())
-				newStruct := reflect.Indirect(reflect.New(underlyingType))
-				if errParse := s.parse(parsingCompanion, joinedEnvKey, newStruct); errParse != nil {
+			// If we have a non-pointer struct, it may contain default
+			// values, which we want to preserve by not creating a new
+			// instance of the struct.
+			if deepestPotentialPointer := extractDeepestPotentialPointer(value); deepestPotentialPointer.Kind() != reflect.Pointer {
+				if errParse := s.parse(parsingCompanion, joinedEnvKey, deepestPotentialPointer); errParse != nil {
 					return errParse
 				}
-				parsed = newStruct
+				continue
+			} else
+			// Non-nil Pointervalue, therefore we gotta use the existing
+			// value in order to preserve potentially existing defaults.
+			if !deepestPotentialPointer.IsZero() {
+				if errParse := s.parse(parsingCompanion, joinedEnvKey, deepestPotentialPointer.Elem()); errParse != nil {
+					return errParse
+				}
+				continue
 			}
-			// Make sure that we have the correct alias type if necessary.
-			parsed = parsed.Convert(underlyingType)
+
+			underlyingType := extractNonPointerFieldType(structField.Type.Elem())
+			newStruct := reflect.Indirect(reflect.New(underlyingType))
+			if errParse := s.parse(parsingCompanion, joinedEnvKey, newStruct); errParse != nil {
+				return errParse
+			}
+			parsed = newStruct
 		}
 
 		if parsed.IsZero() {
 			continue
 		}
 
-		value.Set(convertValueToPointerIfRequired(value, parsed))
+		// Make sure that we have the correct alias type if necessary.
+		parsed = parsed.Convert(underlyingType)
+		parsed = convertValueToPointerIfRequired(value, parsed)
+		value.Set(parsed)
 	}
 
 	return nil
