@@ -245,6 +245,86 @@ func Test_Parse_StructPointers_PreserveDefaults(t *testing.T) {
 	}
 }
 
+type customTextUnmarshableMultifield struct {
+	SetManually    string
+	SetOnUnmarshal string
+}
+
+func (uc *customTextUnmarshableMultifield) UnmarshalText(data []byte) error {
+	if uc == nil {
+		*uc = customTextUnmarshableMultifield{}
+	}
+	uc.SetOnUnmarshal = string(data)
+	return nil
+}
+
+func Test_CustomTextUnmarshalerMultifield_InterfaceCompliance(t *testing.T) {
+	var temp = customTextUnmarshableMultifield{}
+	var _ encoding.TextUnmarshaler = &temp
+}
+
+func Test_Parse_CustomTextUnmarshal_PreserveDefaults(t *testing.T) {
+	type config struct {
+		Custom customTextUnmarshableMultifield `key:"custom"`
+	}
+
+	t.Setenv("CUSTOM", "set")
+	c := config{
+		Custom: customTextUnmarshableMultifield{
+			SetManually: "default",
+		},
+	}
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "default", c.Custom.SetManually)
+		assert.Equal(t, "set", c.Custom.SetOnUnmarshal)
+	}
+}
+
+func Test_Parse_CustomTextUnmarshalPointer_PreserveDefaults(t *testing.T) {
+	type config struct {
+		Custom *customTextUnmarshableMultifield `key:"custom"`
+	}
+
+	t.Setenv("CUSTOM", "set")
+	c := config{
+		Custom: &customTextUnmarshableMultifield{
+			SetManually: "default",
+		},
+	}
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "default", c.Custom.SetManually)
+		assert.Equal(t, "set", c.Custom.SetOnUnmarshal)
+	}
+}
+
+func Test_Parse_CustomTextUnmarshalDeepPointer_PreserveDefaults(t *testing.T) {
+	type config struct {
+		Custom ***customTextUnmarshableMultifield `key:"custom"`
+	}
+
+	t.Setenv("CUSTOM", "set")
+	a := &customTextUnmarshableMultifield{
+		SetManually: "default",
+	}
+	b := &a
+	c := config{
+		Custom: &b,
+	}
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "default", (***c.Custom).SetManually)
+		assert.Equal(t, "set", (***c.Custom).SetOnUnmarshal)
+	}
+}
+
 func Test_Parse_Struct_Invalid(t *testing.T) {
 	type substruct struct {
 		FieldC int `key:"field_c"`

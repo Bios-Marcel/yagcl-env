@@ -132,14 +132,29 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 		// in stone, as it hasn't been documented properly.
 		// https://stackoverflow.com/questions/50279840/when-is-go-reflect-caninterface-false
 		if value.CanInterface() {
-			// New pointer value, since non-pointers can't implement json.UnmarshalText.
-			parsed = reflect.New(underlyingType)
-			if u, ok := parsed.Interface().(encoding.TextUnmarshaler); ok {
+			// Here we try to find the deepest pointer type. As something
+			// like ***type doesn't allow calling `TextUnmarshal` and a value
+			// type doesn't allow it either. If we get a value type instead of
+			// a pointer, we manually wrap it.
+			var target reflect.Value
+			if deepestPotentialPointer := extractDeepestPotentialPointer(value); deepestPotentialPointer.Kind() == reflect.Pointer {
+				if deepestPotentialPointer.IsNil() {
+					target = reflect.New(underlyingType)
+				} else {
+					target = deepestPotentialPointer
+				}
+			} else {
+				target = reflect.New(underlyingType)
+				// Preserve potential defaults set in non-pointer value.
+				target.Elem().Set(value)
+			}
+
+			if u, ok := target.Interface().(encoding.TextUnmarshaler); ok {
 				if err := u.UnmarshalText([]byte(envValue)); err != nil {
 					return fmt.Errorf("value '%s' isn't parsable as an '%s' for field '%s'; %s: %w", envValue, underlyingType.String(), structField.Name, err, yagcl.ErrParseValue)
 				}
 
-				parsed = reflect.Indirect(parsed)
+				parsed = reflect.Indirect(target)
 			} else {
 				// Make sure we attempt a manual parse later.
 				parsed = reflect.Zero(underlyingType)
@@ -157,17 +172,16 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 				// If we have a non-pointer struct, it may contain default
 				// values, which we want to preserve by not creating a new
 				// instance of the struct.
-				if value.Kind() != reflect.Pointer {
-					if errParse := s.parse(parsingCompanion, joinedEnvKey, value); errParse != nil {
+				if deepestPotentialPointer := extractDeepestPotentialPointer(value); deepestPotentialPointer.Kind() != reflect.Pointer {
+					if errParse := s.parse(parsingCompanion, joinedEnvKey, deepestPotentialPointer); errParse != nil {
 						return errParse
 					}
 					continue
-				}
-
+				} else
 				// Non-nil Pointervalue, therefore we gotta use the existing
 				// value in order to preserve potentially existing defaults.
-				if !value.IsZero() {
-					if errParse := s.parse(parsingCompanion, joinedEnvKey, value.Elem()); errParse != nil {
+				if !deepestPotentialPointer.IsZero() {
+					if errParse := s.parse(parsingCompanion, joinedEnvKey, deepestPotentialPointer.Elem()); errParse != nil {
 						return errParse
 					}
 					continue
@@ -447,6 +461,18 @@ func parseIntoArray(fieldName string, fieldType reflect.Type, targetArray reflec
 		targetIndex.Set(convertValueToPointerIfRequired(targetIndex, parsedValue))
 	}
 	return nil
+}
+
+func extractDeepestPotentialPointer(value reflect.Value) reflect.Value {
+	if value.Kind() == reflect.Pointer {
+		if value.Elem().Kind() != reflect.Pointer {
+			return value
+		}
+
+		return extractDeepestPotentialPointer(value.Elem())
+	}
+
+	return value
 }
 
 func extractNonPointerFieldType(fieldType reflect.Type) reflect.Type {
