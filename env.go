@@ -154,8 +154,20 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 					return errParseValue
 				}
 
+				// If we have a non-pointer struct, it may contain default
+				// values, which we want to preserve by not creating a new
+				// instance of the struct.
 				if value.Kind() != reflect.Pointer {
 					if errParse := s.parse(parsingCompanion, joinedEnvKey, value); errParse != nil {
+						return errParse
+					}
+					continue
+				}
+
+				// Non-nil Pointervalue, therefore we gotta use the existing
+				// value in order to preserve potentially existing defaults.
+				if !value.IsZero() {
+					if errParse := s.parse(parsingCompanion, joinedEnvKey, value.Elem()); errParse != nil {
 						return errParse
 					}
 					continue
@@ -292,6 +304,10 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 		}
 	case reflect.Pointer:
 		{
+			nonPointerFieldType := extractNonPointerFieldType(fieldType)
+			if nonPointerFieldType.Kind() == reflect.Struct {
+				return reflect.Value{}, errEmbeddedStructDetected
+			}
 			return parseValue(fieldName, extractNonPointerFieldType(fieldType), envValue)
 		}
 	case reflect.Map:
