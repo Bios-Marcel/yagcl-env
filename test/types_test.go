@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/Bios-Marcel/yagcl"
 	env "github.com/Bios-Marcel/yagcl-env"
@@ -38,6 +40,20 @@ func Test_Parse_Duration(t *testing.T) {
 	if assert.NoError(t, err) {
 		assert.Equal(t, time.Second*10, c.FieldA)
 	}
+}
+
+func Test_Parse_Duration_Unparsable(t *testing.T) {
+	type configuration struct {
+		FieldA time.Duration `key:"field_a"`
+	}
+
+	t.Setenv("FIELD_A", "notaduration")
+	var c configuration
+	err := yagcl.
+		New[configuration]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
 }
 
 func Test_Parse_Struct(t *testing.T) {
@@ -641,6 +657,39 @@ func Test_Parse_CustomTextUnmarshaler(t *testing.T) {
 	}
 }
 
+type intCustomUnmarshalable int64
+
+func (uc *intCustomUnmarshalable) UnmarshalText(data []byte) error {
+	i, err := strconv.ParseInt(string(data), 10, 64)
+	if err != nil {
+		return err
+	}
+	*uc = intCustomUnmarshalable(i)
+	return nil
+}
+
+func (uc intCustomUnmarshalable) String() string {
+	return fmt.Sprintf("%d", uc)
+}
+
+func Test_intCustomUnmarshalable_InterfaceCompliance(t *testing.T) {
+	var temp = intCustomUnmarshalable(0)
+	var _ encoding.TextUnmarshaler = &temp
+}
+
+func Test_Parse_CustomTextUnmarshaler_Unparsable(t *testing.T) {
+	type configuration struct {
+		FieldA intCustomUnmarshalable `key:"field_a"`
+	}
+
+	t.Setenv("FIELD_A", "no int")
+	var c configuration
+	err := yagcl.New[configuration]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
+}
+
 func Test_Parse_CustomTextUnmarshaler_Nested(t *testing.T) {
 	type thing struct {
 		FieldA customTextUnmarshalable `key:"field_a"`
@@ -777,6 +826,19 @@ func Test_Parse_IntSlice(t *testing.T) {
 	}
 }
 
+func Test_Parse_SliceInvalidValue(t *testing.T) {
+	type config struct {
+		Field []int `key:"field"`
+	}
+
+	t.Setenv("FIELD", "notanint ")
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
+}
+
 func Test_Parse_StringSlice(t *testing.T) {
 	type config struct {
 		Field []string `key:"field"`
@@ -873,8 +935,7 @@ func Test_Parse_StringPointerSlice(t *testing.T) {
 	}
 }
 
-func Test_Parse_StructSlice(t *testing.T) {
-	//FIXME Needs to be implemented
+func Test_Parse_StructSlice_UnsupportedType(t *testing.T) {
 	type parsable struct {
 		FieldB string `json:"field_b"`
 	}
@@ -925,6 +986,35 @@ func Test_Parse_IntArray(t *testing.T) {
 	t.Setenv("FIELD", "1,2,3")
 	c = config{}
 	err = yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrParseValue)
+}
+
+func Test_Parse_StructArray_UnsupportedType(t *testing.T) {
+	type parsable struct {
+		FieldB string `json:"field_b"`
+	}
+	type config struct {
+		Field [1]parsable `key:"field"`
+	}
+
+	t.Setenv("FIELD", `{"field_b": "b"}`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrUnsupportedFieldType)
+}
+
+func Test_Parse_ArrayInvalidValue(t *testing.T) {
+	type config struct {
+		Field [1]int `key:"field"`
+	}
+
+	t.Setenv("FIELD", "notanint ")
+	var c config
+	err := yagcl.New[config]().
 		Add(env.Source()).
 		Parse(&c)
 	assert.ErrorIs(t, err, yagcl.ErrParseValue)
@@ -1039,4 +1129,16 @@ func Test_Parse_Map_StringEscaping(t *testing.T) {
 	if assert.NoError(t, err) {
 		assert.Equal(t, map[int]string{1: "good day=fun"}, c.Field)
 	}
+}
+
+func Test_Parse_UnsupportedType(t *testing.T) {
+	type config struct {
+		Field unsafe.Pointer `key:"field"`
+	}
+	t.Setenv("FIELD", `value`)
+	var c config
+	err := yagcl.New[config]().
+		Add(env.Source()).
+		Parse(&c)
+	assert.ErrorIs(t, err, yagcl.ErrUnsupportedFieldType)
 }

@@ -136,7 +136,7 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 			parsed = reflect.New(underlyingType)
 			if u, ok := parsed.Interface().(encoding.TextUnmarshaler); ok {
 				if err := u.UnmarshalText([]byte(envValue)); err != nil {
-					return err
+					return fmt.Errorf("value '%s' isn't parsable as an '%s' for field '%s'; %s: %w", envValue, underlyingType.String(), structField.Name, err, yagcl.ErrParseValue)
 				}
 
 				parsed = reflect.Indirect(parsed)
@@ -304,6 +304,8 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 		}
 	case reflect.Map:
 		{
+			//FIXME Check if map-type is supported.
+
 			rawEntries := splitString(envValue, ',')
 			targetMap := reflect.MakeMapWithSize(fieldType, len(rawEntries))
 			for index, entry := range rawEntries {
@@ -336,13 +338,17 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 			arrayRawValues := splitString(envValue, ',')
 			targetArray := reflect.MakeSlice(fieldType, len(arrayRawValues), len(arrayRawValues))
 			if err := parseIntoArray(fieldName, fieldType, targetArray, arrayRawValues); err != nil {
+				// Wrapping ErrParseValue isn't necessary, as this internally
+				// calls parseValue, which should already take care of that.
 				return reflect.Value{}, err
 			}
 			return targetArray, nil
 		}
 
 	case reflect.Array:
-		// Arrays are of fixed size and therefore append calls won't work.
+		// Arrays are of fixed size (for example the definition int[3]),
+		// therefore we treat them separately from slices, as not passing
+		// correct amount of values indicates a configuration error.
 		{
 			if !isSliceTypeSupported(fieldType.Elem()) {
 				return reflect.Value{}, fmt.Errorf("field '%s' has unsupported type '%s': %w", fieldName, fieldType.String(), yagcl.ErrUnsupportedFieldType)
@@ -354,6 +360,8 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 				return reflect.Value{}, fmt.Errorf("value specified for field '%s' is an array of incorrect length, expected length %d, but got %d: %w", fieldName, targetArray.Len(), len(arrayRawValues), yagcl.ErrParseValue)
 			}
 			if err := parseIntoArray(fieldName, fieldType, targetArray, arrayRawValues); err != nil {
+				// Wrapping ErrParseValue isn't necessary, as this internally
+				// calls parseValue, which should already take care of that.
 				return reflect.Value{}, err
 			}
 			return targetArray, nil
