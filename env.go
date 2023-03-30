@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"reflect"
 	"strconv"
@@ -12,12 +13,14 @@ import (
 	"time"
 
 	"github.com/Bios-Marcel/yagcl"
+	"github.com/subosito/gotenv"
 )
 
 // DO NOT CREATE INSTANCES MANUALLY, THIS IS ONLY PUBLIC IN ORDER FOR GODOC
 // TO RENDER AVAILABLE FUNCTIONS.
 type EnvSource struct {
 	prefix            string
+	path              string
 	keyValueConverter func(string) string
 	keyJoiner         func(string, string) string
 }
@@ -35,6 +38,13 @@ func Source() *EnvSource {
 // For example "PREFIX_FIELD_NAME".
 func (s *EnvSource) Prefix(prefix string) *EnvSource {
 	s.prefix = prefix
+	return s
+}
+
+// Path specifies a filepath to an environment file. The file is parsed and
+// loaded into the environment. If it doesn't exist, it is ignored.
+func (s *EnvSource) Path(path string) *EnvSource {
+	s.path = path
 	return s
 }
 
@@ -57,11 +67,13 @@ func defaultKeyValueConverter(s string) string {
 
 // KeyJoiner defines the function that builds the environment variable keys.
 // For example consider the following struct:
-//     type Config struct {
-//         Sub struct {
-//             Field int `key:"field"`
-//         } `key:"sub"`
-//     }
+//
+//	type Config struct {
+//	    Sub struct {
+//	        Field int `key:"field"`
+//	    } `key:"sub"`
+//	}
+//
 // The joiner could for example produce sub_field, depending. In combination
 // with KeyValueConverter, this could then become SUB_FIELD.
 func (s *EnvSource) KeyJoiner(keyJoiner func(string, string) string) *EnvSource {
@@ -89,6 +101,17 @@ func (s *EnvSource) KeyTag() string {
 
 // Parse implements Source.Parse.
 func (s *EnvSource) Parse(parsingCompanion yagcl.ParsingCompanion, configurationStruct any) (bool, error) {
+	if s.path != "" {
+		handle, err := os.Open(s.path)
+		if err == nil {
+			if err := gotenv.OverApply(handle); err != nil {
+				return false, fmt.Errorf("error reading .env file: %w", err)
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+
 	// FIXME For now we always say we've loaded something, this should change
 	// at some point, using some kind of "was at least one variable loaded"
 	// check.
@@ -217,7 +240,7 @@ func convertValueToPointerIfRequired(targetValue reflect.Value, newValue reflect
 		return newValue
 	}
 
-	//Create as many values as we have pointers pointing to things.
+	// Create as many values as we have pointers pointing to things.
 	var pointers []reflect.Value
 	lastPointer := reflect.New(targetValue.Type().Elem())
 	pointers = append(pointers, lastPointer)
@@ -323,7 +346,7 @@ func parseValue(fieldName string, fieldType reflect.Type, envValue string) (refl
 		}
 	case reflect.Map:
 		{
-			//FIXME Check if map-type is supported.
+			// FIXME Check if map-type is supported.
 
 			rawEntries := splitString(envValue, ',')
 			targetMap := reflect.MakeMapWithSize(fieldType, len(rawEntries))
@@ -438,7 +461,7 @@ func isSliceTypeSupported(sliceType reflect.Type) bool {
 		reflect.Complex64,
 		reflect.Complex128,
 		reflect.Struct,
-		//FIXME These two still need to be implemented
+		// FIXME These two still need to be implemented
 		reflect.Array,
 		reflect.Slice:
 
