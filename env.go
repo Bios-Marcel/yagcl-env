@@ -1,10 +1,12 @@
 package env
 
 import (
+	"bytes"
 	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"reflect"
@@ -16,44 +18,146 @@ import (
 	"github.com/subosito/gotenv"
 )
 
-// DO NOT CREATE INSTANCES MANUALLY, THIS IS ONLY PUBLIC IN ORDER FOR GODOC
-// TO RENDER AVAILABLE FUNCTIONS.
-type EnvSource struct {
+// ErrNoDataSourceSpecified is thrown if none Bytes, String, Path or Reader
+// of the EnvSourceSetupStepOne interface have been called.
+var ErrNoDataSourceSpecified = errors.New("no data source specified; call Bytes(), String(), Reader() or Path()")
+
+// ErrNoDataSourceSpecified is thrown if more than one of Bytes, String, Path
+// or Reader of the EnvSourceSetupStepOne interface have been called.
+var ErrMultipleDataSourcesSpecified = errors.New("more than one data source specified; only call one of Bytes(), String(), Reader() or Path()")
+
+type envSourceImpl struct {
+	path    string
+	bytes   []byte
+	reader  io.Reader
+	readEnv bool
+
+	must              bool
+	loadIntoEnv       bool
 	prefix            string
-	path              string
 	keyValueConverter func(string) string
 	keyJoiner         func(string, string) string
 }
 
+type EnvSourceSetupStepOne[T yagcl.Source] interface {
+	// Bytes defines a byte array to read from directly.
+	Bytes([]byte) EnvSourceSetupStepTwoEnvFile[T]
+	// Bytes defines a string to read from directly.
+	String(string) EnvSourceSetupStepTwoEnvFile[T]
+	// Path defines a filepath that is accessed when YAGCL.Parse is called.
+	Path(string) EnvSourceSetupStepTwoEnvFile[T]
+	// Reader defines a reader that is accessed when YAGCL.Parse is called. IF
+	// available, io.Closer.Close() is called.
+	Reader(io.Reader) EnvSourceSetupStepTwoEnvFile[T]
+	// Env instructs the source to read directly from the environment
+	// variables.
+	Env() EnvSourceSetupStepTwoEnv[T]
+}
+
+type EnvSourceSetupStepTwoEnvFile[T yagcl.Source] interface {
+	EnvSourceOptionalSetup[T]
+
+	// LoadIntoEnv activates loading the unparsed data into the environment
+	// variables of the process.
+	LoadIntoEnv() T
+	// Must declares this source as mandatory, erroring in case no data can
+	// be loaded. In case of loading directly from the environment, this
+	// will always succeed though, as the environment is always there, even
+	// if we can't load any values, due to the fact they aren't available.
+	Must() T
+}
+
+type EnvSourceSetupStepTwoEnv[T yagcl.Source] interface {
+	EnvSourceOptionalSetup[T]
+}
+
+type EnvSourceOptionalSetup[T yagcl.Source] interface {
+	yagcl.Source
+
+	// Prefix specified the prefixes expected in environment variable keys.
+	// For example "PREFIX_FIELD_NAME".
+	Prefix(string) T
+	// KeyValueConverter defines how the yagcl.DefaultKeyTagName value should be
+	// converted for this source. If you are setting this, you'll most likely
+	// also have to set EnvSource.KeyJoiner(string,string) string.
+	// Note that calling this isn't required, as there's a best practise default
+	// behaviour.
+	KeyValueConverter(func(string) string) T
+	// KeyJoiner defines the function that builds the environment variable keys.
+	// For example consider the following struct:
+	//
+	//	type Config struct {
+	//	    Sub struct {
+	//	        Field int `key:"field"`
+	//	    } `key:"sub"`
+	//	}
+	//
+	// The joiner could for example produce sub_field, depending. In combination
+	// with KeyValueConverter, this could then become SUB_FIELD.
+	KeyJoiner(func(string, string) string) T
+}
+
 // Source creates a source for environment variables of the current
 // process.
-func Source() *EnvSource {
-	return &EnvSource{
+func Source() EnvSourceSetupStepOne[*envSourceImpl] {
+	return &envSourceImpl{
 		keyValueConverter: defaultKeyValueConverter,
 		keyJoiner:         defaultKeyJoiner,
 	}
 }
 
-// Prefix specified the prefixes expected in environment variable keys.
-// For example "PREFIX_FIELD_NAME".
-func (s *EnvSource) Prefix(prefix string) *EnvSource {
-	s.prefix = prefix
+// Bytes implements EnvSourceSetupStepOne.Bytes.
+func (s *envSourceImpl) Bytes(bytes []byte) EnvSourceSetupStepTwoEnvFile[*envSourceImpl] {
+	s.bytes = bytes
 	return s
 }
 
-// Path specifies a filepath to an environment file. The file is parsed and
-// loaded into the environment. If it doesn't exist, it is ignored.
-func (s *EnvSource) Path(path string) *EnvSource {
+// String implements EnvSourceSetupStepOne.String.
+func (s *envSourceImpl) String(str string) EnvSourceSetupStepTwoEnvFile[*envSourceImpl] {
+	s.bytes = []byte(str)
+	return s
+}
+
+// Path implements EnvSourceSetupStepOne.Path.
+func (s *envSourceImpl) Path(path string) EnvSourceSetupStepTwoEnvFile[*envSourceImpl] {
 	s.path = path
 	return s
 }
 
-// KeyValueConverter defines how the yagcl.DefaultKeyTagName value should be
-// converted for this source. If you are setting this, you'll most likely
-// also have to set EnvSource.KeyJoiner(string,string) string.
-// Note that calling this isn't required, as there's a best practise default
-// behaviour.
-func (s *EnvSource) KeyValueConverter(keyValueConverter func(string) string) *EnvSource {
+// Reader implements EnvSourceSetupStepOne.Reader.
+func (s *envSourceImpl) Reader(reader io.Reader) EnvSourceSetupStepTwoEnvFile[*envSourceImpl] {
+	s.reader = reader
+	return s
+}
+
+// Reader implements EnvSourceSetupStepOne.Env.
+func (s *envSourceImpl) Env() EnvSourceSetupStepTwoEnv[*envSourceImpl] {
+	s.readEnv = true
+	return s
+}
+
+// LoadIntoEnv implements EnvSourceOptionalSetup.LoadIntoEnv.
+func (s *envSourceImpl) LoadIntoEnv() *envSourceImpl {
+	// note that this is nonsensical if Env() was called, however, technically
+	// it doesn't matter, as the result will be the same.
+	s.loadIntoEnv = true
+	return s
+}
+
+// Must implements EnvSourceOptionalSetup.Must.
+func (s *envSourceImpl) Must() *envSourceImpl {
+	s.must = true
+	return s
+}
+
+// Prefix implements EnvSourceOptionalSetup.Prefix.
+func (s *envSourceImpl) Prefix(prefix string) *envSourceImpl {
+	s.prefix = prefix
+	return s
+}
+
+// KeyValueConverter implements EnvSourceOptionalSetup.KeyValueConverter.
+func (s *envSourceImpl) KeyValueConverter(keyValueConverter func(string) string) *envSourceImpl {
 	s.keyValueConverter = keyValueConverter
 	return s
 }
@@ -65,18 +169,8 @@ func defaultKeyValueConverter(s string) string {
 	return strings.ToUpper(s)
 }
 
-// KeyJoiner defines the function that builds the environment variable keys.
-// For example consider the following struct:
-//
-//	type Config struct {
-//	    Sub struct {
-//	        Field int `key:"field"`
-//	    } `key:"sub"`
-//	}
-//
-// The joiner could for example produce sub_field, depending. In combination
-// with KeyValueConverter, this could then become SUB_FIELD.
-func (s *EnvSource) KeyJoiner(keyJoiner func(string, string) string) *EnvSource {
+// KeyJoiner implements EnvSourceOptionalSetup.KeyJoiner.
+func (s *envSourceImpl) KeyJoiner(keyJoiner func(string, string) string) *envSourceImpl {
 	s.keyJoiner = keyJoiner
 	return s
 }
@@ -95,30 +189,138 @@ func defaultKeyJoiner(s1, s2 string) string {
 }
 
 // KeyTag implements Source.Key.
-func (s *EnvSource) KeyTag() string {
+func (s *envSourceImpl) KeyTag() string {
 	return "env"
 }
 
-// Parse implements Source.Parse.
-func (s *EnvSource) Parse(parsingCompanion yagcl.ParsingCompanion, configurationStruct any) (bool, error) {
-	if s.path != "" {
-		handle, err := os.Open(s.path)
-		if err == nil {
-			if err := gotenv.OverApply(handle); err != nil {
-				return false, fmt.Errorf("error reading .env file: %w", err)
+type envLookup func(key string) (string, bool)
+
+func (s *envSourceImpl) load() (lookup envLookup, err error) {
+	var env gotenv.Env
+
+	// We attempt to check if the source can't be found. While we only do
+	// direct file access in case a path is passed, a reader might also
+	// attempt reading from a file source, therefore we try to check that
+	// error as well. If the source has been set successfuly, we convert it
+	// into a lookup function.
+	defer func() {
+		if err != nil {
+			return
+		}
+
+		lookup = func(key string) (string, bool) {
+			val, set := env[key]
+			return val, set
+		}
+
+		if s.loadIntoEnv {
+			for key, val := range env {
+				os.Setenv(key, val)
 			}
-		} else if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-			return false, err
+		}
+	}()
+
+	// Do bytes first, since it saves us the error handling code.
+	if len(s.bytes) > 0 {
+		env, err = gotenv.StrictParse(bytes.NewReader(s.bytes))
+		return
+	}
+
+	if s.path != "" {
+		env, err = gotenv.Read(s.path)
+		return
+	}
+
+	if s.reader != nil {
+		if closer, ok := s.reader.(io.Closer); ok {
+			defer closer.Close()
+		}
+
+		env, err = gotenv.StrictParse(s.reader)
+		return
+	}
+
+	// This should be dead code and therefore isn't covered by a test either.
+	err = errors.New("verification process must have failed, please report this to the maintainer")
+	return
+}
+
+// verify checks whether the source has been configured correctly. We attempt
+// avoiding any condiguration errors by API design.
+func (s *envSourceImpl) verify() error {
+	var (
+		dataSourcesCount uint
+	)
+	if s.readEnv {
+		dataSourcesCount++
+	}
+	if s.path != "" {
+		dataSourcesCount++
+	}
+	if len(s.bytes) > 0 {
+		dataSourcesCount++
+	}
+	if s.reader != nil {
+		dataSourcesCount++
+	}
+
+	if dataSourcesCount == 0 {
+		return ErrNoDataSourceSpecified
+	}
+	if dataSourcesCount > 1 {
+		return ErrMultipleDataSourcesSpecified
+	}
+
+	if s.path != "" {
+		info, err := os.Stat(s.path)
+		if err != nil {
+			return err
+		}
+		if info != nil && info.IsDir() {
+			return errors.New("path, must be a directory: %s")
+		}
+	}
+
+	return nil
+}
+
+// Parse implements Source.Parse.
+func (s *envSourceImpl) Parse(parsingCompanion yagcl.ParsingCompanion, configurationStruct any) (dataLoaded bool, err error) {
+	defer func() {
+		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+			err = yagcl.ErrSourceNotFound
+		}
+		if !s.must && errors.Is(err, yagcl.ErrSourceNotFound) {
+			err = nil
+		}
+		if err != nil {
+			dataLoaded = false
+		}
+	}()
+
+	if err = s.verify(); err != nil {
+		return
+	}
+
+	var lookup envLookup
+	if s.readEnv {
+		lookup = os.LookupEnv
+	} else {
+		lookup, err = s.load()
+		if err != nil {
+			return
 		}
 	}
 
 	// FIXME For now we always say we've loaded something, this should change
 	// at some point, using some kind of "was at least one variable loaded"
 	// check.
-	return true, s.parse(parsingCompanion, s.prefix, reflect.Indirect(reflect.ValueOf(configurationStruct)))
+	dataLoaded = true
+	err = s.parse(parsingCompanion, lookup, s.prefix, reflect.Indirect(reflect.ValueOf(configurationStruct)))
+	return
 }
 
-func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix string, structValue reflect.Value) error {
+func (s *envSourceImpl) parse(parsingCompanion yagcl.ParsingCompanion, lookup envLookup, envPrefix string, structValue reflect.Value) error {
 	structType := structValue.Type()
 	for i := 0; i < structValue.NumField(); i++ {
 		structField := structType.Field(i)
@@ -131,7 +333,7 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 			return errExtractKey
 		}
 		joinedEnvKey := s.keyJoiner(envPrefix, envKey)
-		envValue, set := os.LookupEnv(joinedEnvKey)
+		envValue, set := lookup(joinedEnvKey)
 		if !set {
 			// Since we handle pointers and structs differently, we must not do early exists / errors in these cases.
 			if structField.Type.Kind() != reflect.Struct && structField.Type.Kind() != reflect.Pointer {
@@ -193,7 +395,7 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 			// values, which we want to preserve by not creating a new
 			// instance of the struct.
 			if deepestPotentialPointer := extractDeepestPotentialPointer(value); deepestPotentialPointer.Kind() != reflect.Pointer {
-				if errParse := s.parse(parsingCompanion, joinedEnvKey, deepestPotentialPointer); errParse != nil {
+				if errParse := s.parse(parsingCompanion, lookup, joinedEnvKey, deepestPotentialPointer); errParse != nil {
 					return errParse
 				}
 				continue
@@ -201,7 +403,7 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 			// Non-nil Pointervalue, therefore we gotta use the existing
 			// value in order to preserve potentially existing defaults.
 			if !deepestPotentialPointer.IsZero() {
-				if errParse := s.parse(parsingCompanion, joinedEnvKey, deepestPotentialPointer.Elem()); errParse != nil {
+				if errParse := s.parse(parsingCompanion, lookup, joinedEnvKey, deepestPotentialPointer.Elem()); errParse != nil {
 					return errParse
 				}
 				continue
@@ -209,7 +411,7 @@ func (s *EnvSource) parse(parsingCompanion yagcl.ParsingCompanion, envPrefix str
 
 			underlyingType := extractNonPointerFieldType(structField.Type.Elem())
 			newStruct := reflect.Indirect(reflect.New(underlyingType))
-			if errParse := s.parse(parsingCompanion, joinedEnvKey, newStruct); errParse != nil {
+			if errParse := s.parse(parsingCompanion, lookup, joinedEnvKey, newStruct); errParse != nil {
 				return errParse
 			}
 			parsed = newStruct
@@ -256,10 +458,9 @@ func convertValueToPointerIfRequired(targetValue reflect.Value, newValue reflect
 	return pointers[0]
 }
 
-func (s *EnvSource) extractEnvKey(parsingCompanion yagcl.ParsingCompanion, structField reflect.StructField) (string, error) {
+func (s *envSourceImpl) extractEnvKey(parsingCompanion yagcl.ParsingCompanion, structField reflect.StructField) (string, error) {
 	// Custom tag
-	key := structField.Tag.Get(s.KeyTag())
-	if key != "" {
+	if key := structField.Tag.Get(s.KeyTag()); key != "" {
 		return key, nil
 	}
 
