@@ -1282,3 +1282,35 @@ func Test_Parse_UnsupportedType(t *testing.T) {
 		Parse(&c)
 	assert.ErrorIs(t, err, yagcl.ErrUnsupportedFieldType)
 }
+
+func Test_Parse_StringArray_EmptyValues(t *testing.T) {
+	// Skipped, decision as to what consistent behaviour should be, has not
+	// yet been made.
+	t.Skip()
+
+	type configuration struct {
+		FieldA []string `key:"field_a"`
+	}
+
+	t.Setenv("FIELD_A", ",a,b,")
+	var c configuration
+	err := yagcl.New[configuration]().Add(env.Source().Env()).Parse(&c)
+	if assert.NoError(t, err) {
+		assert.Equal(t, []string{"", "a", "b", ""}, c.FieldA)
+	}
+}
+
+func Test_Parse_IntArray_EmptyValues(t *testing.T) {
+	// Skipped, decision as to what consistent behaviour should be, has not
+	// yet been made.
+	t.Skip()
+
+	type configuration struct {
+		FieldA []int `key:"field_a"`
+	}
+
+	t.Setenv("FIELD_A", ",1,2,")
+	var c configuration
+	err := yagcl.New[configuration]().Add(env.Source().Env()).Parse(&c)
+	assert.Error(t, err)
+}
