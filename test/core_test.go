@@ -148,9 +148,6 @@ func (fr failingReader) Read(p []byte) (n int, err error) {
 }
 
 func Test_Parse_ReaderSource_Error(t *testing.T) {
-	// Waiting for PR https://github.com/subosito/gotenv/pull/22 to be merged.
-	t.Skip()
-
 	type configuration struct{}
 	var c configuration
 	assert.Error(t, yagcl.New[configuration]().Add(env.Source().Reader(&failingReader{}).Must()).Parse(&c))
